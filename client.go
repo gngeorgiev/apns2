@@ -14,7 +14,10 @@ import (
 	"net/http"
 	"time"
 
+	"crypto/rand"
+
 	"github.com/sideshow/apns2/token"
+
 	"golang.org/x/net/http2"
 )
 
@@ -24,10 +27,10 @@ const (
 	HostProduction  = "https://api.push.apple.com"
 )
 
-// DefaultHost is a mutable var for testing purposes
-var DefaultHost = HostDevelopment
-
 var (
+	// DefaultHost is a mutable var for testing purposes
+	DefaultHost = HostDevelopment
+
 	// TLSDialTimeout is the maximum amount of time a dial will wait for a connect
 	// to complete.
 	TLSDialTimeout = 20 * time.Second
@@ -56,6 +59,11 @@ type Client struct {
 	Certificate tls.Certificate
 	Token       *token.Token
 	HTTPClient  *http.Client
+
+	pinging      bool
+	stopPinging  chan struct{}
+	pingInterval time.Duration
+	conn         *tls.Conn
 }
 
 // A Context carries a deadline, a cancellation signal, and other values across
@@ -87,18 +95,76 @@ func NewClient(certificate tls.Certificate) *Client {
 	if len(certificate.Certificate) > 0 {
 		tlsConfig.BuildNameToCertificate()
 	}
+
+	client := &Client{}
+
 	transport := &http2.Transport{
 		TLSClientConfig: tlsConfig,
 		DialTLS:         DialTLS,
 	}
-	return &Client{
-		HTTPClient: &http.Client{
-			Transport: transport,
-			Timeout:   HTTPClientTimeout,
-		},
-		Certificate: certificate,
-		Host:        DefaultHost,
+
+	transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+		conn, err := DialTLS(network, addr, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		client.conn = conn.(*tls.Conn)
+		return conn, nil
 	}
+	client.HTTPClient = &http.Client{
+		Transport: transport,
+		Timeout:   HTTPClientTimeout,
+	}
+	client.Certificate = certificate
+	client.Host = DefaultHost
+
+	return client
+}
+
+func (c *Client) EnablePinging(pingInterval time.Duration, pingError chan error) {
+	//lets make sure that the old goroutine has exited in case the user calls this method multiple times
+	c.DisablePinging()
+
+	c.pinging = true
+	c.pingInterval = pingInterval
+
+	go func() {
+		t := time.NewTicker(pingInterval)
+		var framer *http2.Framer
+		for {
+			select {
+			case <-t.C:
+				if c.conn == nil {
+					continue
+				}
+
+				if framer == nil {
+					framer = http2.NewFramer(c.conn, c.conn)
+				}
+
+				var p [8]byte
+				rand.Read(p[:])
+				err := framer.WritePing(false, p)
+				if err != nil && pingError != nil {
+					pingError <- err
+				}
+			case <-c.stopPinging:
+				t.Stop()
+				framer = nil
+				close(pingError)
+				return
+			}
+		}
+	}()
+}
+
+func (c *Client) DisablePinging() {
+	if c.pinging {
+		c.stopPinging <- struct{}{}
+	}
+
+	c.pinging = false
 }
 
 // NewTokenClient returns a new Client with an underlying http.Client configured
@@ -133,6 +199,14 @@ func (c *Client) Development() *Client {
 func (c *Client) Production() *Client {
 	c.Host = HostProduction
 	return c
+}
+
+func (c *Client) IsPinging() bool {
+	return c.pinging
+}
+
+func (c *Client) GetPingInterval() time.Duration {
+	return c.pingInterval
 }
 
 // Push sends a Notification to the APNs gateway. If the underlying http.Client
@@ -187,6 +261,7 @@ func (c *Client) PushWithContext(ctx Context, n *Notification) (*Response, error
 	if err := decoder.Decode(&response); err != nil && err != io.EOF {
 		return &Response{}, err
 	}
+
 	return response, nil
 }
 
