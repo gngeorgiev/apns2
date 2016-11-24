@@ -16,6 +16,8 @@ import (
 
 	"crypto/rand"
 
+	"sync"
+
 	"github.com/sideshow/apns2/token"
 
 	"golang.org/x/net/http2"
@@ -61,6 +63,7 @@ type Client struct {
 	HTTPClient  *http.Client
 
 	pinging      bool
+	pingingMutex sync.Mutex
 	stopPinging  chan struct{}
 	pingInterval time.Duration
 	conn         *tls.Conn
@@ -126,6 +129,9 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingError chan error)
 	//lets make sure that the old goroutine has exited in case the user calls this method multiple times
 	c.DisablePinging()
 
+	c.pingingMutex.Lock()
+	defer c.pingingMutex.Unlock()
+
 	c.pinging = true
 	c.pingInterval = pingInterval
 
@@ -160,6 +166,9 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingError chan error)
 }
 
 func (c *Client) DisablePinging() {
+	c.pingingMutex.Lock()
+	defer c.pingingMutex.Unlock()
+
 	if c.pinging {
 		c.stopPinging <- struct{}{}
 	}
@@ -202,6 +211,8 @@ func (c *Client) Production() *Client {
 }
 
 func (c *Client) IsPinging() bool {
+	c.pingingMutex.Lock()
+	defer c.pingingMutex.Unlock()
 	return c.pinging
 }
 
