@@ -50,6 +50,7 @@ type Client struct {
 	stopPinging  chan struct{}
 	pingInterval time.Duration
 	conn         *tls.Conn
+	connMutex    sync.Mutex
 }
 
 // NewClient returns a new Client with an underlying http.Client configured with
@@ -83,7 +84,7 @@ func NewClient(certificate tls.Certificate) *Client {
 			return nil, err
 		}
 
-		client.conn = conn
+		client.setConnection(conn)
 		return conn, nil
 	}
 
@@ -98,7 +99,7 @@ func NewClient(certificate tls.Certificate) *Client {
 	return client
 }
 
-func (c *Client) EnablePinging(pingInterval time.Duration, pingError chan error) {
+func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan error) {
 	//lets make sure that the old goroutine has exited in case the user calls this method multiple times
 	c.DisablePinging()
 
@@ -114,24 +115,29 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingError chan error)
 		for {
 			select {
 			case <-t.C:
-				if c.conn == nil {
+				conn := c.getConnection()
+				if conn == nil {
 					continue
 				}
 
 				if framer == nil {
-					framer = http2.NewFramer(c.conn, c.conn)
+					framer = http2.NewFramer(conn, conn)
 				}
 
 				var p [8]byte
 				rand.Read(p[:])
 				err := framer.WritePing(false, p)
-				if err != nil && pingError != nil {
-					pingError <- err
+				if err != nil {
+					c.setConnection(nil)
+					framer = nil
+					if pingErrorCh != nil {
+						pingErrorCh <- err
+					}
 				}
 			case <-c.stopPinging:
 				t.Stop()
 				framer = nil
-				close(pingError)
+				close(pingErrorCh)
 				return
 			}
 		}
@@ -202,6 +208,18 @@ func (c *Client) Push(n *Notification) (*Response, error) {
 	}
 
 	return response, nil
+}
+
+func (c *Client) getConnection() *tls.Conn {
+	c.connMutex.Lock()
+	defer c.connMutex.Unlock()
+	return c.conn
+}
+
+func (c *Client) setConnection(conn *tls.Conn) {
+	c.connMutex.Lock()
+	c.conn = conn
+	c.connMutex.Unlock()
 }
 
 func setHeaders(r *http.Request, n *Notification) {
