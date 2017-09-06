@@ -85,7 +85,7 @@ func NewClient(certificate tls.Certificate) *Client {
 		TLSClientConfig: tlsConfig,
 	}
 
-	dialTsl := func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+	dialTls := func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: TLSDialTimeout}, network, addr, cfg)
 		if err != nil {
 			return nil, err
@@ -95,7 +95,7 @@ func NewClient(certificate tls.Certificate) *Client {
 		return conn, nil
 	}
 
-	transport.DialTLS = dialTsl
+	transport.DialTLS = dialTls
 	client.HTTPClient = &http.Client{
 		Transport: transport,
 		Timeout:   HTTPClientTimeout,
@@ -232,7 +232,6 @@ func (c *Client) PushWithContext(ctx Context, n *Notification) (*Response, error
 	return response, nil
 }
 
-<<<<<<< HEAD
 func (c *Client) getConnection() *tls.Conn {
 	c.connMutex.Lock()
 	defer c.connMutex.Unlock()
@@ -243,13 +242,13 @@ func (c *Client) setConnection(conn *tls.Conn) {
 	c.connMutex.Lock()
 	c.conn = conn
 	c.connMutex.Unlock()
-=======
+}
+
 // CloseIdleConnections closes any underlying connections which were previously
 // connected from previous requests but are now sitting idle. It will not
 // interrupt any connections currently in use.
 func (c *Client) CloseIdleConnections() {
 	c.HTTPClient.Transport.(connectionCloser).CloseIdleConnections()
->>>>>>> d8025ed79cfc29685627a009c7966ad7dfc11ae1
 }
 
 func setHeaders(r *http.Request, n *Notification) {
