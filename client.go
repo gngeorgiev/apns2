@@ -88,7 +88,12 @@ func NewClient(certificate tls.Certificate) *Client {
 	}
 
 	dialTLS := func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: TLSDialTimeout}, network, addr, cfg)
+		dialer := &net.Dialer{
+			Timeout:   TLSDialTimeout,
+			KeepAlive: TCPKeepAlive,
+		}
+
+		conn, err := tls.DialWithDialer(dialer, network, addr, cfg)
 		if err != nil {
 			return nil, err
 		}
