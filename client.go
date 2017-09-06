@@ -62,12 +62,14 @@ type Client struct {
 	Token       *token.Token
 	HTTPClient  *http.Client
 
-	pinging      bool
 	pingingMutex sync.Mutex
+	pinging      bool
+
 	stopPinging  chan struct{}
 	pingInterval time.Duration
-	conn         *tls.Conn
-	connMutex    sync.Mutex
+
+	connMutex sync.Mutex
+	conn      *tls.Conn
 }
 
 // A Context carries a deadline, a cancellation signal, and other values across
@@ -126,6 +128,8 @@ func NewClient(certificate tls.Certificate) *Client {
 	return client
 }
 
+//EnablePinging starts pinging the last opened connection. This way, there's always one connection
+//kept alive which allows for quick send of push notifications
 func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan error) {
 	//lets make sure that the old goroutine has exited in case the user calls this method multiple times
 	c.DisablePinging()
@@ -171,6 +175,7 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan erro
 	}()
 }
 
+//DisablePinging stops the pinging
 func (c *Client) DisablePinging() {
 	c.pingingMutex.Lock()
 	defer c.pingingMutex.Unlock()
@@ -216,12 +221,14 @@ func (c *Client) Production() *Client {
 	return c
 }
 
+//IsPinging returns whether the client is currently pinging the APNS servers
 func (c *Client) IsPinging() bool {
 	c.pingingMutex.Lock()
 	defer c.pingingMutex.Unlock()
 	return c.pinging
 }
 
+//GetPingInterval returns the ping interval, if set on EnablePinging
 func (c *Client) GetPingInterval() time.Duration {
 	return c.pingInterval
 }
