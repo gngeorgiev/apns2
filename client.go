@@ -36,7 +36,10 @@ var (
 	// HTTPClientTimeout specifies a time limit for requests made by the
 	// HTTPClient. The timeout includes connection time, any redirects,
 	// and reading the response body.
-	HTTPClientTimeout = 30 * time.Second
+	HTTPClientTimeout = 60 * time.Second
+	// TCPKeepAlive specifies the keep-alive period for an active network
+	// connection. If zero, keep-alives are not enabled.
+	TCPKeepAlive = 60 * time.Second
 )
 
 // Client represents a connection with the APNs
@@ -51,6 +54,10 @@ type Client struct {
 	pingInterval time.Duration
 	conn         *tls.Conn
 	connMutex    sync.Mutex
+}
+
+type connectionCloser interface {
+	CloseIdleConnections()
 }
 
 // NewClient returns a new Client with an underlying http.Client configured with
@@ -182,9 +189,23 @@ func (c *Client) GetPingInterval() time.Duration {
 // transparently before sending the notification. It will return a Response
 // indicating whether the notification was accepted or rejected by the APNs
 // gateway, or an error if something goes wrong.
+//
+// Use PushWithContext if you need better cancelation and timeout control.
 func (c *Client) Push(n *Notification) (*Response, error) {
-	payload, err := json.Marshal(n)
+	return c.PushWithContext(nil, n)
+}
 
+// PushWithContext sends a Notification to the APNs gateway. Context carries a
+// deadline and a cancelation signal and allows you to close long running
+// requests when the context timeout is exceeded. Context can be nil, for
+// backwards compatibility.
+//
+// If the underlying http.Client is not currently connected, this method will
+// attempt to reconnect transparently before sending the notification. It will
+// return a Response indicating whether the notification was accepted or
+// rejected by the APNs gateway, or an error if something goes wrong.
+func (c *Client) PushWithContext(ctx Context, n *Notification) (*Response, error) {
+	payload, err := json.Marshal(n)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +213,8 @@ func (c *Client) Push(n *Notification) (*Response, error) {
 	url := fmt.Sprintf("%v/3/device/%v", c.Host, n.DeviceToken)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	setHeaders(req, n)
-	httpRes, err := c.HTTPClient.Do(req)
+
+	httpRes, err := c.requestWithContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +232,7 @@ func (c *Client) Push(n *Notification) (*Response, error) {
 	return response, nil
 }
 
+<<<<<<< HEAD
 func (c *Client) getConnection() *tls.Conn {
 	c.connMutex.Lock()
 	defer c.connMutex.Unlock()
@@ -220,6 +243,13 @@ func (c *Client) setConnection(conn *tls.Conn) {
 	c.connMutex.Lock()
 	c.conn = conn
 	c.connMutex.Unlock()
+=======
+// CloseIdleConnections closes any underlying connections which were previously
+// connected from previous requests but are now sitting idle. It will not
+// interrupt any connections currently in use.
+func (c *Client) CloseIdleConnections() {
+	c.HTTPClient.Transport.(connectionCloser).CloseIdleConnections()
+>>>>>>> d8025ed79cfc29685627a009c7966ad7dfc11ae1
 }
 
 func setHeaders(r *http.Request, n *Notification) {
@@ -232,9 +262,6 @@ func setHeaders(r *http.Request, n *Notification) {
 	}
 	if n.CollapseID != "" {
 		r.Header.Set("apns-collapse-id", n.CollapseID)
-	}
-	if n.ThreadID != "" {
-		r.Header.Set("thread-id", n.ThreadID)
 	}
 	if n.Priority > 0 {
 		r.Header.Set("apns-priority", fmt.Sprintf("%v", n.Priority))
