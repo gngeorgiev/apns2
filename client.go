@@ -48,12 +48,14 @@ type Client struct {
 	Certificate tls.Certificate
 	Host        string
 
-	pinging      bool
 	pingingMutex sync.Mutex
+	pinging      bool
+
 	stopPinging  chan struct{}
 	pingInterval time.Duration
-	conn         *tls.Conn
-	connMutex    sync.Mutex
+
+	connMutex sync.Mutex
+	conn      *tls.Conn
 }
 
 type connectionCloser interface {
@@ -85,7 +87,7 @@ func NewClient(certificate tls.Certificate) *Client {
 		TLSClientConfig: tlsConfig,
 	}
 
-	dialTls := func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+	dialTLS := func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: TLSDialTimeout}, network, addr, cfg)
 		if err != nil {
 			return nil, err
@@ -95,7 +97,7 @@ func NewClient(certificate tls.Certificate) *Client {
 		return conn, nil
 	}
 
-	transport.DialTLS = dialTls
+	transport.DialTLS = dialTLS
 	client.HTTPClient = &http.Client{
 		Transport: transport,
 		Timeout:   HTTPClientTimeout,
@@ -106,6 +108,8 @@ func NewClient(certificate tls.Certificate) *Client {
 	return client
 }
 
+//EnablePinging starts pinging the last opened connection. This way, there's always one connection
+//kept alive which allows for quick send of push notifications
 func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan error) {
 	//lets make sure that the old goroutine has exited in case the user calls this method multiple times
 	c.DisablePinging()
@@ -151,6 +155,7 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan erro
 	}()
 }
 
+//DisablePinging stops the pinging
 func (c *Client) DisablePinging() {
 	c.pingingMutex.Lock()
 	defer c.pingingMutex.Unlock()
@@ -174,12 +179,14 @@ func (c *Client) Production() *Client {
 	return c
 }
 
+//IsPinging returns whether the client is currently pinging the APNS servers
 func (c *Client) IsPinging() bool {
 	c.pingingMutex.Lock()
 	defer c.pingingMutex.Unlock()
 	return c.pinging
 }
 
+//GetPingInterval returns the ping interval, if set on EnablePinging
 func (c *Client) GetPingInterval() time.Duration {
 	return c.pingInterval
 }
@@ -232,6 +239,13 @@ func (c *Client) PushWithContext(ctx Context, n *Notification) (*Response, error
 	return response, nil
 }
 
+// CloseIdleConnections closes any underlying connections which were previously
+// connected from previous requests but are now sitting idle. It will not
+// interrupt any connections currently in use.
+func (c *Client) CloseIdleConnections() {
+	c.HTTPClient.Transport.(connectionCloser).CloseIdleConnections()
+}
+
 func (c *Client) getConnection() *tls.Conn {
 	c.connMutex.Lock()
 	defer c.connMutex.Unlock()
@@ -242,13 +256,6 @@ func (c *Client) setConnection(conn *tls.Conn) {
 	c.connMutex.Lock()
 	c.conn = conn
 	c.connMutex.Unlock()
-}
-
-// CloseIdleConnections closes any underlying connections which were previously
-// connected from previous requests but are now sitting idle. It will not
-// interrupt any connections currently in use.
-func (c *Client) CloseIdleConnections() {
-	c.HTTPClient.Transport.(connectionCloser).CloseIdleConnections()
 }
 
 func setHeaders(r *http.Request, n *Notification) {
