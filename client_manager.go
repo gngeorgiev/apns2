@@ -148,7 +148,9 @@ func (m *ClientManager) removeElement(e *list.Element) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ll.Remove(e)
-	delete(m.cache, e.Value.(*managerItem).key)
+	item := e.Value.(*managerItem)
+	delete(m.cache, item.key)
+	item.client.DisablePinging()
 }
 
 func cacheKey(certificate tls.Certificate) [sha1.Size]byte {
