@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -43,6 +44,9 @@ var (
 	// TCPKeepAlive specifies the keep-alive period for an active network
 	// connection. If zero, keep-alives are not enabled.
 	TCPKeepAlive = 60 * time.Second
+
+	// ErrPingingStopped is returned when the pinging of a client is stopped
+	ErrPingingStopped = errors.New("pinging stopped")
 )
 
 // DialTLS is the default dial function for creating TLS connections for
@@ -168,7 +172,9 @@ func (c *Client) EnablePinging(pingInterval time.Duration, pingErrorCh chan erro
 			case <-c.stopPinging:
 				t.Stop()
 				framer = nil
-				close(pingErrorCh)
+				if pingErrorCh != nil {
+					pingErrorCh <- ErrPingingStopped
+				}
 				return
 			}
 		}
