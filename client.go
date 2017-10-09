@@ -223,12 +223,18 @@ func (c *Client) Push(n *Notification) (*Response, error) {
 // return a Response indicating whether the notification was accepted or
 // rejected by the APNs gateway, or an error if something goes wrong.
 func (c *Client) PushWithContext(ctx Context, n *Notification) (*Response, error) {
+	return c.PushWithHostContext(ctx, c.Host, n)
+}
+
+//PushWithHostContext sends a push with the specified host and context
+//useful when one client needs to send dev and prod notifications in a concurrent environment
+func (c *Client) PushWithHostContext(ctx Context, host string, n *Notification) (*Response, error) {
 	payload, err := json.Marshal(n)
 	if err != nil {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%v/3/device/%v", c.Host, n.DeviceToken)
+	url := fmt.Sprintf("%v/3/device/%v", host, n.DeviceToken)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	setHeaders(req, n)
 
