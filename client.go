@@ -128,6 +128,7 @@ func NewClient(certificate tls.Certificate) *Client {
 	}
 	client.Certificate = certificate
 	client.Host = DefaultHost
+	client.stopPinging = make(chan struct{})
 
 	return client
 }
