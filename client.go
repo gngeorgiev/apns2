@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/sideshow/apns2/token"
-
 	"golang.org/x/net/http2"
 )
 
