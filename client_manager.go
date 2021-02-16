@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"sync"
 	"time"
+
+	"github.com/gngeorgiev/apns2/token"
 )
 
 type managerItem struct {
@@ -31,6 +33,10 @@ type ClientManager struct {
 	// manager.
 	Factory func(certificate tls.Certificate) *Client
 
+	// FactoryToken is the function which constructs clients if not found in the
+	// manager when token auth is used
+	FactoryToken func(token *token.Token) *Client
+
 	cache map[[sha1.Size]byte]*list.Element
 	ll    *list.List
 	mu    sync.Mutex
@@ -48,9 +54,10 @@ type ClientManager struct {
 // a Client with default options.
 func NewClientManager() *ClientManager {
 	manager := &ClientManager{
-		MaxSize: 64,
-		MaxAge:  10 * time.Minute,
-		Factory: NewClient,
+		MaxSize:      64,
+		MaxAge:       10 * time.Minute,
+		Factory:      NewClient,
+		FactoryToken: NewTokenClient,
 	}
 
 	manager.initInternals()
@@ -65,7 +72,13 @@ func (m *ClientManager) Add(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := cacheKey(client.Certificate)
+	var key [sha1.Size]byte
+	if client.Token != nil {
+		key = cacheTokenKey(client.Token)
+	} else {
+		key = cacheKey(client.Certificate)
+	}
+
 	now := time.Now()
 	if ele, hit := m.cache[key]; hit {
 		item := ele.Value.(*managerItem)
@@ -83,21 +96,32 @@ func (m *ClientManager) Add(client *Client) {
 	}
 }
 
+func (m *ClientManager) Get(certificate tls.Certificate) *Client {
+	return m.get(cacheKey(certificate), func() *Client {
+		return m.Factory(certificate)
+	})
+}
+
+func (m *ClientManager) GetToken(token *token.Token) *Client {
+	return m.get(cacheTokenKey(token), func() *Client {
+		return m.FactoryToken(token)
+	})
+}
+
 // Get gets a Client from the manager. If a Client is not found in the manager
 // or if a Client has remained in the manager longer than MaxAge, Get will call
 // the ClientManager's Factory function, store the result in the manager if
 // non-nil, and return it.
-func (m *ClientManager) Get(certificate tls.Certificate) *Client {
+func (m *ClientManager) get(key [sha1.Size]byte, factory func() *Client) *Client {
 	m.initInternals()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := cacheKey(certificate)
 	now := time.Now()
 	if ele, hit := m.cache[key]; hit {
 		item := ele.Value.(*managerItem)
 		if m.MaxAge != 0 && item.lastUsed.Before(now.Add(-m.MaxAge)) {
-			c := m.Factory(certificate)
+			c := factory()
 			if c == nil {
 				return nil
 			}
@@ -108,7 +132,7 @@ func (m *ClientManager) Get(certificate tls.Certificate) *Client {
 		return item.client
 	}
 
-	c := m.Factory(certificate)
+	c := factory()
 	if c == nil {
 		return nil
 	}
@@ -161,4 +185,8 @@ func cacheKey(certificate tls.Certificate) [sha1.Size]byte {
 	}
 
 	return sha1.Sum(data)
+}
+
+func cacheTokenKey(token *token.Token) [sha1.Size]byte {
+	return sha1.Sum([]byte(token.Bearer))
 }
