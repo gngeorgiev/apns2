@@ -86,6 +86,35 @@ type connectionCloser interface {
 	CloseIdleConnections()
 }
 
+func newDefaultClient() *Client {
+	client := &Client{}
+	client.Host = DefaultHost
+	client.stopPinging = make(chan struct{})
+	client.HTTPClient = &http.Client{
+		Timeout: HTTPClientTimeout,
+	}
+
+	return client
+}
+
+func newClientWithHttp2Transport() *Client {
+	client := newDefaultClient()
+	t := &http2.Transport{}
+	t.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+		conn, err := DialTLS(network, addr, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		client.setConnection(conn.(*tls.Conn))
+		return conn, nil
+	}
+
+	client.HTTPClient.Transport = t
+
+	return client
+}
+
 // NewClient returns a new Client with an underlying http.Client configured with
 // the correct APNs HTTP/2 transport settings. It does not connect to the APNs
 // until the first Notification is sent via the Push method.
@@ -105,29 +134,9 @@ func NewClient(certificate tls.Certificate) *Client {
 		tlsConfig.BuildNameToCertificate()
 	}
 
-	client := &Client{}
-
-	transport := &http2.Transport{
-		TLSClientConfig: tlsConfig,
-		DialTLS:         DialTLS,
-	}
-
-	transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-		conn, err := DialTLS(network, addr, cfg)
-		if err != nil {
-			return nil, err
-		}
-
-		client.setConnection(conn.(*tls.Conn))
-		return conn, nil
-	}
-	client.HTTPClient = &http.Client{
-		Transport: transport,
-		Timeout:   HTTPClientTimeout,
-	}
+	client := newClientWithHttp2Transport()
+	client.HTTPClient.Transport.(*http2.Transport).TLSClientConfig = tlsConfig
 	client.Certificate = certificate
-	client.Host = DefaultHost
-	client.stopPinging = make(chan struct{})
 
 	return client
 }
@@ -202,17 +211,9 @@ func (c *Client) DisablePinging() {
 // notifications; don’t repeatedly open and close connections. APNs treats rapid
 // connection and disconnection as a denial-of-service attack.
 func NewTokenClient(token *token.Token) *Client {
-	transport := &http2.Transport{
-		DialTLS: DialTLS,
-	}
-	return &Client{
-		Token: token,
-		HTTPClient: &http.Client{
-			Transport: transport,
-			Timeout:   HTTPClientTimeout,
-		},
-		Host: DefaultHost,
-	}
+	client := newClientWithHttp2Transport()
+	client.Token = token
+	return client
 }
 
 // Development sets the Client to use the APNs development push endpoint.
