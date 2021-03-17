@@ -272,7 +272,7 @@ func (c *Client) PushWithHostContext(ctx Context, host string, n *Notification) 
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%v/3/device/%v", c.Host, n.DeviceToken)
+	url := fmt.Sprintf("%v/3/device/%v", host, n.DeviceToken)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, err
