@@ -188,5 +188,9 @@ func cacheKey(certificate tls.Certificate) [sha1.Size]byte {
 }
 
 func cacheTokenKey(token *token.Token) [sha1.Size]byte {
-	return sha1.Sum([]byte(token.Bearer))
+	if token.Bearer != "" {
+		return sha1.Sum([]byte(token.Bearer + token.TeamID + token.KeyID))
+	}
+
+	return sha1.Sum([]byte(token.TeamID + token.KeyID))
 }
